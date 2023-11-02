@@ -3193,6 +3193,80 @@ function executeJS(code) {
 	return jsCode();
 }
 
+var modules = {};
+var isModule = false;
+var modPrefixes = [[]];
+
+function runModule(identifier, code, prefix) {
+	modPrefixes.push(prefix);
+	modules[identifier] = (new Function("isModule", code))(true);
+	modPrefixes.pop();
+}
+
+function normalizeModIdentifer(identifier) {
+	identifier = identifier.toLowerCase();
+	var parts = identifier.split('/');
+	parts = parts.filter(part => part !== '.' && part !== '');
+
+	var result = [...modPrefixes[modPrefixes.length - 1]];
+	for (var i = 0; i < parts.length; ++i) {
+		if (parts[i] === "..") {
+			if (result.length > 0)
+				result.pop();
+		} else {
+			result.push(parts[i]);
+		}
+	}
+
+	identifier = result.join('/');
+	if (/^[\w-]+\/[\w-]+(?:@[\w.-]+)?\/(.+\.js)$/.test(identifier)) {
+		return identifier;
+	}
+	
+	return null;
+}
+
+function isModuleLoaded(identifier, normalize) {
+	if (typeof normalize === "undefined")
+		normalize = true;
+
+	if (normalize) {
+		identifier = normalizeModIdentifer(identifier);
+		if (identifier === null) {
+			console.warn("Invalid module name provided.");
+			return null;
+		}
+	}
+
+	return modules.hasOwnProperty(identifier);
+}
+
+function use(identifier) {
+	identifier = normalizeModIdentifer(identifier);
+	if (identifier === null) {
+		console.warn("Invalid module name provided.");
+		return null;
+	}
+
+	if (isModuleLoaded(identifier, false)) {
+		return modules[identifier];
+	}
+
+	var req = new XMLHttpRequest();
+	req.open("GET", "https://cdn.jsdelivr.net/gh/" + identifier, false);
+	req.send(null);
+
+	if (req.status == 200) {
+		var prefix = identifier.split("/").slice(0, -1);
+
+		runModule(identifier, req.responseText, prefix);
+		return modules[identifier];
+	}
+
+	console.warn("Request to load module " + identifier + "failed.");
+	return null;
+}
+
 function confirmRunJSLink(data) {
 	var preview = data;
 	if(preview.length > 256) {
