@@ -2813,6 +2813,11 @@ async function start_server() {
 	}
 
 	loadPlugin(true);
+	
+	var plugin = loadPlugin();
+	if(plugin && plugin.main) {
+		plugin.main(global_data);
+	}
 }
 
 // the server context
@@ -2831,6 +2836,7 @@ var global_data = {
 	isTestServer,
 	shellEnabled,
 	loadString,
+	restrictions,
 	saveRestrictions,
 	uvias,
 	accountSystem,
