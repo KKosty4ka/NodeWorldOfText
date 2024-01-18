@@ -189,12 +189,12 @@ module.exports = async function(ws, data, send, broadcast, server, ctx) {
 		[0, "ping", null, "check the latency", null],
 		[0, "warp", ["world"], "go to another world", "forexample"], // client-side
 		[0, "gridsize", ["WxH"], "change the size of cells", "10x20"], // client-side
-		[0, "block", ["id"], "mute someone by id", "1220"],
-		[0, "blockuser", ["username"], "mute someone by username", "JohnDoe"],
+		[0, "block", ["id"], "block someone by id", "1220"],
+		[0, "blockuser", ["username"], "block someone by username", "JohnDoe"],
 		[0, "unblock", ["id"], "unblock someone by id", "1220"],
 		[0, "unblockuser", ["username"], "unblock someone by username", "JohnDoe"],
 		[0, "unblockall", null, "unblock all users", null],
-		[0, "mute", ["id", "seconds"], "mute a user for everyone", "1220 9999"], // check for permission
+		[0, "mute", ["id", "seconds", "[h/d/w/m/y]"], "mute a user completely", "1220 9999"], // check for permission
 		[0, "clearmutes", null, "unmute all clients"], // check for permission
 		[0, "delete", ["id", "timestamp"], "delete a chat message", "1220 1693147307895"], // check for permission
 		[0, "color", ["color code"], "change your text color", "#FF00FF"], // client-side
@@ -606,6 +606,22 @@ module.exports = async function(ws, data, send, broadcast, server, ctx) {
 			if(!is_owner && !user.staff) return;
 			id = san_nbr(id);
 			time = san_nbr(time); // in seconds
+
+			var timeSuffixMap = {
+				"h": 3600,
+				"d": 86400,
+				"w": 86400*7,
+				"m": 86400*30,
+				"y": 31556925.216 //average year length
+			};
+
+			if(flag in timeSuffixMap) {
+				time *= timeSuffixMap[flag];
+			} else { 
+				if(flag) { //invalid flag
+					return serverChatResponse("Invalid flag used for muting, must be h, d, w, m, or y.")
+				}
+			}
 
 			if(location == "global" && !user.staff) {
 				return serverChatResponse("You do not have permission to mute on global", location);
