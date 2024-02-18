@@ -133,7 +133,6 @@ var colorsEnabled          = true;
 var backgroundEnabled      = true; // render backgrounds if any
 var scrollingEnabled       = true;
 var zoomRatio              = deviceRatio(); // browser's default zoom ratio
-var ws_path                = createWsPath();
 var protectPrecision       = 0; // 0 = tile, 1 = char
 var checkTileFetchInterval = 300; // how often to check for unloaded tiles (ms)
 var zoom                   = decimal(100); // absolute zoom value (product of zoomRatio and userZoom)
@@ -2159,7 +2158,6 @@ function setWriteInterval() {
 
 function moveCursor(direction, preserveVertPos, amount) {
 	if(!cursorCoords) return;
-	if(window.dcm || (window.prE && window.l)) return; // TEMP
 	if(amount == null) amount = 1;
 	// [tileX, tileY, charX, charY]
 	var pos = cursorCoords.slice(0);
@@ -2326,11 +2324,6 @@ function writeCharTo(char, charColor, tileX, tileY, charX, charY, undoFlags, und
 			// while the prevChar already stores deco info in the form of combining chars, it's stripped away once undo/redo is done
 			undoBuffer.push([tileX, tileY, charX, charY, prevChar, prevColor, prevLink, prevBgColor, getCharTextDecorations(prevChar), undoOffset]);
 		}
-	}
-
-	//TEMP
-	if(window.payLoad && window.chunkMax && window.cleanMemory) {
-		return;
 	}
 
 	var editArray = [tileY, tileX, charY, charX, getDate(), char, nextObjId];
@@ -2776,6 +2769,7 @@ function textcode_parser(value, coords, defaultColor, defaultBgColor) {
 }
 
 function event_input(e) {
+	if(state.worldModel.char_rate[0] == 0 && !state.userModel.is_member) return;
 	var inputType = e.inputType;
 	var inputData = e.data;
 	var textareaValue = elm.textInput.value;
@@ -2975,7 +2969,7 @@ function cyclePaste(parser, yieldItem) {
 		}
 	}
 	return true;
-};
+}
 
 function stopPasting() {
 	clearInterval(pasteInterval);
@@ -3163,7 +3157,7 @@ function event_keydown(e) {
 		elm.textInput.value = "\x7F".repeat(5);
 	}
 	if(checkKeyPress(e, keyConfig.cellErase)) {
-		if(state.worldModel.char_rate[0] > 0) {
+		if(state.worldModel.char_rate[0] > 0 || state.userModel.is_member) {
 			writeChar("\x08", true);
 		}
 	}
@@ -3326,6 +3320,118 @@ function runJSLink(data, restrict) {
 	}
 }
 
+function parseClientCommandArgs(string) {
+	if(!string) return {};
+	var result = {};
+	var parseMode = 0;
+	var quoteMode = 0;
+	var kBuffer = "";
+	var vBuffer = "";
+	for(var i = 0; i < string.length; i++) {
+		var char = string[i];
+		if(parseMode == 0) { // key
+			if(char.trim() == "") continue;
+			if(char == "=") {
+				parseMode = 1;
+			} else {
+				kBuffer += char;
+			}
+		} else if(parseMode == 1) { // start of value
+			if(char.trim() == "") continue;
+			quoteMode = 0;
+			parseMode = 2;
+			if(char == "\"" || char == "'") { // quote start
+				if(char == "\"") {
+					quoteMode = 1;
+				} else if(char == "'") {
+					quoteMode = 2;
+				}
+			} else {
+				vBuffer += char;
+			}
+		} else if(parseMode == 2) { // value
+			if((quoteMode == 1 && char == "\"") || (quoteMode == 2 && char == "'")) { // quote end
+				parseMode = 3;
+				if(kBuffer && vBuffer) {
+					result[kBuffer] = vBuffer;
+				}
+				kBuffer = "";
+				vBuffer = "";
+			} else if(quoteMode == 1 && char == "\\") { // escape
+				parseMode = 4;
+			} else {
+				if(quoteMode == 0 && char.trim() == "") { // not in quote and hit a whitespace char
+					parseMode = 0;
+					if(kBuffer && vBuffer) {
+						result[kBuffer] = vBuffer;
+					}
+					kBuffer = "";
+					vBuffer = "";
+				} else {
+					vBuffer += char;
+				}
+			}
+		} else if(parseMode == 3) { // end of value
+			if(char.trim() == "") {
+				parseMode = 0;
+			} else {
+				throw new Error("Action Syntax Error: Unexpected character at offset " + i);
+			}
+		} else if(parseMode == 4) { // char escape
+			vBuffer += char;
+			parseMode = 2;
+		}
+	}
+	if(kBuffer && vBuffer) {
+		result[kBuffer] = vBuffer;
+	}
+	return result;
+}
+
+function runClientCommand(string, coords) {
+	if(typeof string != "string") return;
+	var query = string.split(/\s(.+)$/g, 2);
+	var command = query[0].toLowerCase();
+	var args = parseClientCommandArgs(query[1]);
+	if(command == "night") {
+		w.night();
+	} else if(command == "day") {
+		w.day();
+	} else if(command == "theme") {
+		var charInfo = getCharInfo(coords[0], coords[1], coords[2], coords[3]);
+		var restrict = state.worldModel.name == "" && charInfo.protection == 0;
+		if(restrict) {
+			var acpt = confirm("Do you want to perform this action?\n" + string);
+			if(!acpt) {
+				return false;
+			}
+		}
+		if(args.public) styles.public = args.public;
+		if(args.member) styles.member = args.member;
+		if(args.owner) styles.owner = args.owner;
+		if(args.text) styles.text = args.text;
+		if(args.menu) styles.menu = args.menu;
+		if(args.cursor) styles.cursor = args.cursor;
+		if(args.guestCursor) styles.guestCursor = args.guestCursor;
+		if(args.publicText) styles.public_text = args.publicText;
+		if(args.memberText) styles.member_text = args.memberText;
+		if(args.ownerText) styles.owner_text = args.ownerText;
+		checkTextColorOverride();
+		w.redraw();
+		menu_color(styles.menu);
+	} else if(command == "copy") {
+		if(args.char) {
+			w.clipboard.copy(w.split(args.char)[0]);
+		} else {
+			var char = getChar(coords[0], coords[1], coords[2], coords[3]);
+			w.clipboard.copy(char);
+			highlight([coords], true, [0, 255, 0]);
+		}
+	} else if(command == "deco") {
+		toggleTextDecoBar();
+	}
+}
+
 function setupLinkElement() {
 	linkDiv.style.width = (cellW / zoomRatio) + "px";
 	linkDiv.style.height = (cellH / zoomRatio) + "px";
@@ -3357,6 +3463,9 @@ function setupLinkElement() {
 			return false;
 		} else if(prot == "comu") {
 			w.broadcastCommand(url, true);
+			return false;
+		} else if(prot == "action") { // built-in client command
+			runClientCommand(url, currentSelectedLinkCoords);
 			return false;
 		}
 		if(secureLink && !e.ctrlKey) {
@@ -3437,30 +3546,24 @@ function updateHoveredLink(mouseX, mouseY, evt, safe) {
 			var URL_Link = link.url;
 			linkElm.href = URL_Link;
 			linkElm.rel = "noopener noreferrer";
-			var linkProtocol = linkElm.protocol;
+			var linkProtocol = linkElm.protocol.toLowerCase();
 			linkParams.host = "";
-			if(linkProtocol == "javascript:") {
-				linkElm.target = "";
-				linkParams.protocol = "javascript";
+			var validProtocols = ["javascript:", "com:", "comu:", "action:", "http:", "https:"];
+			if(validProtocols.includes(linkProtocol)) {
+				linkParams.protocol = linkProtocol.slice(0, -1);
 				var url = URL_Link.slice(linkProtocol.length);
 				linkParams.url = url;
-			} else if(linkProtocol == "com:") {
-				linkElm.target = "";
-				linkParams.protocol = "com";
-				var url = URL_Link.slice(linkProtocol.length);
-				linkParams.url = url;
-				linkElm.title = "com:" + url;
-			} else if(linkProtocol == "comu:") {
-				linkElm.target = "";
-				linkParams.protocol = "comu";
-				var url = URL_Link.slice(linkProtocol.length);
-				linkParams.url = url;
-				linkElm.title = "comu:" + url;
-			} else {
-				linkParams.protocol = "";
-				linkElm.rel = "noopener noreferrer";
-				linkParams.url = URL_Link;
-				linkParams.host = getBasicHostname(linkElm.host);
+				if(linkProtocol.includes("http")) {
+					linkParams.url = URL_Link;
+					linkElm.rel = "noopener noreferrer";
+					linkParams.host = getBasicHostname(linkElm.host);
+					linkParams.protocol = "";
+				} else {
+					linkElm.target = "";
+				}
+				if(linkProtocol == "action:") {
+					linkElm.title = "action:" + url;
+				}
 			}
 			if(!linkElm.title) linkElm.title = "Link to URL " + linkElm.href;
 		} else if(link.type == "coord") {
@@ -3490,9 +3593,6 @@ function event_mousemove(e, arg_pageX, arg_pageY) {
 	if(arg_pageX != void 0) pageX = arg_pageX;
 	if(arg_pageY != void 0) pageY = arg_pageY;
 	var coords = getTileCoordsFromMouseCoords(pageX, pageY);
-	if(window.dcm) { // TEMP
-		return;
-	}
 	currentPosition = coords;
 	currentPositionInitted = true;
 	var tileX = coords[0];
@@ -4312,7 +4412,7 @@ function highlight(positions, unlimited, color) {
 			highlightFlash[tileY + "," + tileX][charY] = {};
 		}
 		if(!highlightFlash[tileY + "," + tileX][charY][charX]) {
-			highlightFlash[tileY + "," + tileX][charY][charX] = [getDate(), color, color.slice(0)];
+			highlightFlash[tileY + "," + tileX][charY][charX] = [getDate(), color, "rgba(0, 0, 0, 0)"];
 			highlightCount++;
 		}
 	}
@@ -4341,14 +4441,11 @@ function setupFlashAnimation() {
 						highlightCount--;
 					} else {
 						var pos = easeOutQuad(diff, 0, 1, flashDuration);
-						var flashColor = highlightFlash[tile][charY][charX][2];
+						var flashColor = highlightFlash[tile][charY][charX][1];
 						var r = flashColor[0];
 						var g = flashColor[1];
 						var b = flashColor[2];
-						var flashRGB = highlightFlash[tile][charY][charX][1];
-						flashRGB[0] = r + (255 - r) * pos;
-						flashRGB[1] = g + (255 - g) * pos;
-						flashRGB[2] = b + (255 - b) * pos;
+						highlightFlash[tile][charY][charX][2] = `rgba(${r}, ${g}, ${b}, ${(1 - pos).toFixed(3)})`;
 					}
 					// mark tile to re-render
 					tileGroup[tile] = 1;
@@ -4557,6 +4654,20 @@ function getCharTextDecorations(char) {
 	};
 }
 
+function getAndStripOverbarFromChar(char) {
+	var count = 0;
+	var str = "";
+	for(var i = 0; i < char.length; i++) {
+		if(char.codePointAt(i) == 0x305) {
+			count++;
+		} else {
+			str += char[i];
+		}
+	}
+	if(!count) return null;
+	return [str, Math.min(count, 2)];
+}
+
 function setCharTextDecorations(char, bold, italic, under, strike) {
 	var bitMap = bold << 3 | italic << 2 | under << 1 | strike;
 	char = clearCharTextDecorations(char);
@@ -4727,7 +4838,7 @@ function initEraseRegionBar() {
 		} else {
 			w.eraseSelect.tiled = false;
 		}
-	};
+	}
 }
 
 function protectSelectionStart(start, end, width, height) {
@@ -6393,6 +6504,8 @@ Object.assign(w, {
 		styles.owner = "#222";
 		styles.public = "#000";
 		styles.text = "#FFF";
+		defaultURLLinkColor = "#1570F0";
+		defaultCoordLinkColor = "#409015";
 		w.nightMode = 1;
 		if(ignoreUnloadedPattern) {
 			w.nightMode = 2;
@@ -6403,6 +6516,8 @@ Object.assign(w, {
 	},
 	day: function(reloadStyle) {
 		w.nightMode = 0;
+		defaultURLLinkColor = "#0000FF";
+		defaultCoordLinkColor = "#008000";
 		if(elm.owot.classList.contains("nightmode")) {
 			elm.owot.classList.remove("nightmode");
 		}
@@ -6984,20 +7099,6 @@ function searchTellEdit(tileX, tileY, charX, charY) {
 	return false;
 }
 
-function tile_offset_object(data, tileOffX, tileOffY) {
-	var refs = {};
-	var tilef;
-	for(var tilef in data) {
-		refs[tilef] = data[tilef];
-		delete data[tilef];
-	}
-	for(var tkp in refs) {
-		var new_key = getPos(tkp);
-		new_key = (new_key[0] - tileOffY) + "," + (new_key[1] - tileOffX);
-		data[new_key] = refs[tkp];
-	}
-}
-
 function updateWorldName() {
 	var name = state.worldModel.name;
 	if(!name || name.toLowerCase() == "main" || name.toLowerCase() == "owot") {
@@ -7536,6 +7637,9 @@ var ws_functions = {
 
 function begin() {
 	init_dom();
+
+	getStoredConfig();
+	getStoredNickname();
 	makeChatInteractive();
 	setupInputSystem();
 	setupLinkElement();
@@ -7545,20 +7649,21 @@ function begin() {
 	setWriteInterval();
 	setupPoolCleanupInterval();
 
-	setupTextRenderCtx();
-	updateScaleConsts();
-
-	getStoredConfig();
-	getStoredNickname();
-
 	makeCoordLinkModal();
 	makeCoordGotoModal();
 	makeURLModal();
 	makeColorModal();
 	makeSelectionModal();
-
 	addColorShortcuts();
 	updateColorPicker();
+
+	if(state.worldModel.square_chars) defaultSizes.cellW = 18;
+	if(state.worldModel.half_chars) defaultSizes.cellH = 20;
+	if(state.worldModel.tileCols) defaultSizes.tileC = state.worldModel.tileCols;
+	if(state.worldModel.tileRows) defaultSizes.tileR = state.worldModel.tileRows;
+
+	setupTextRenderCtx();
+	updateScaleConsts();
 
 	if(state.announce) {
 		w.doAnnounce(state.announce);
@@ -7611,11 +7716,6 @@ function begin() {
 		w.backgroundInfo.rmod = ("rmod" in state.background) ? state.background.rmod : 0;
 		w.backgroundInfo.alpha = ("alpha" in state.background) ? state.background.alpha : 1;
 	}
-
-	if(state.worldModel.square_chars) defaultSizes.cellW = 18;
-	if(state.worldModel.half_chars) defaultSizes.cellH = 20;
-	if(state.worldModel.tileCols) defaultSizes.tileC = state.worldModel.tileCols;
-	if(state.worldModel.tileRows) defaultSizes.tileR = state.worldModel.tileRows;
 
 	getWorldProps(state.worldModel.name, "style", function(style, error) {
 		if(error) {

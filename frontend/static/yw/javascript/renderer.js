@@ -722,6 +722,11 @@ function renderChar(textRender, offsetX, offsetY, char, color, cellW, cellH, pro
 	}
 	char = clearCharTextDecorations(char);
 	char = resolveCharEmojiCombinations(char);
+	var overbarCount = getAndStripOverbarFromChar(char);
+	if(overbarCount) {
+		char = overbarCount[0];
+		overbarCount = overbarCount[1];
+	}
 
 	var cCode = char.codePointAt(0);
 	if(isOverflow) {
@@ -789,6 +794,12 @@ function renderChar(textRender, offsetX, offsetY, char, color, cellW, cellH, pro
 			textRender.fillRect(fontX, Math.floor(fontY + Math.floor((16 * zoom) / 2)), cellW, lineDecoHeight);
 			hasDrawn = true;
 		}
+	}
+	if(overbarCount) {
+		for(var i = 0; i < overbarCount; i++) {
+			textRender.fillRect(fontX, Math.floor(fontY + zoom - zoom * i * 2), cellW, lineDecoHeight);
+		}
+		hasDrawn = true;
 	}
 
 	if(((specialClientHookMap >> 0) & 1) && !isOverflow) {
@@ -962,19 +973,24 @@ function renderTileBackground(renderCtx, offsetX, offsetY, tile, tileX, tileY, c
 		hasDrawn = true;
 	}
 
+	// render highlight flashes
 	var highlight = highlightFlash[tileY + "," + tileX];
-	if(highlight) { // highlighted edits
-		for(var y = 0; y < tileR; y++) {
-			for(var x = 0; x < tileC; x++) {
-				if(highlight[y]) {
-					if(highlight[y][x] !== void 0) {
-						var flashRGB = highlight[y][x][1];
-						renderCtx.fillStyle = "rgb(" + flashRGB[0] + "," + flashRGB[1] + "," + flashRGB[2] + ")";
-						renderCtx.fillRect(offsetX + x * cellW, offsetY + y * cellH, cellW, cellH);
-						hasDrawn = true;
-					}
-				}
-			}
+	if(highlight && (cellW > 1 && cellH > 1)) {
+		for(var i = 0; i < tileArea; i++) {
+			var x = i % tileC;
+			var y = Math.floor(i / tileC);
+			if(!(highlight[y] && highlight[y][x] !== void 0)) continue;
+			var flashColor = highlight[y][x][2];
+			renderCtx.fillStyle = flashColor;
+			// clamp to next position in axis
+			var tmpCellW = clampW / tileC;
+			var tmpCellH = clampH / tileR;
+			var sx = Math.floor(x * tmpCellW);
+			var sy = Math.floor(y * tmpCellH);
+			var x2 = Math.floor((x + 1) * tmpCellW);
+			var y2 = Math.floor((y + 1) * tmpCellH);
+			renderCtx.fillRect(offsetX + sx, offsetY + sy, x2 - sx, y2 - sy);
+			hasDrawn = true;
 		}
 	}
 	return hasDrawn;
