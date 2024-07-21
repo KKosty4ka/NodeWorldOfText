@@ -6,7 +6,7 @@ const serverPath = "./runserver.js";
 
 const http = require("http");
 let maintenance_port = null;
-
+// this is a a second test
 // Listen for exit command from the console
 function listenForExitCommand() {
 	process.stdin.resume();
